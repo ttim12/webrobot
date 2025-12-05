@@ -1,3 +1,4 @@
 使用gemini3.0PRO 生成的一个简易ai模型网页,通过调用摄像头实时判断手势来实现一些操作
 
-![Uploading 屏幕截图 2025-11-29 203517.png…]()
+
+<img width="2491" height="1394" alt="屏幕截图 2025-11-29 203517" src="https://github.com/user-attachments/assets/524862bc-7593-4f0c-b70b-21e312c66cae" />
