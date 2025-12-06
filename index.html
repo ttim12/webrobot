@@ -2,364 +2,613 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>Three.js 进阶手势粒子系统</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 战术狙击系统 (全能版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- TensorFlow.js Core & Models -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
     <style>
-        body { margin: 0; overflow: hidden; background-color: #050505; font-family: 'Segoe UI', sans-serif; }
-        
-        #ui-panel {
+        body {
+            background-color: #000;
+            color: #0f0;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            overflow: hidden;
+        }
+
+        /* 视频层 */
+        video {
             position: absolute;
-            top: 20px; right: 20px; width: 260px;
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white;
-            z-index: 10;
-        }
-        
-        h2 { margin: 0 0 10px 0; font-size: 18px; }
-        p { font-size: 12px; opacity: 0.7; margin-bottom: 15px; }
-
-        /* 状态指示器 */
-        #status-indicator {
-            margin-top: 10px;
-            padding: 8px;
-            background: rgba(0,0,0,0.5);
-            border-radius: 5px;
-            font-size: 14px;
-            text-align: center;
-            color: #00ffcc;
-            font-weight: bold;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+            transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* 更平滑的变焦 */
+            display: none; /* 初始隐藏，JS加载完后会显示 */
         }
 
-        #video-container {
-            position: absolute; bottom: 20px; left: 20px;
-            width: 160px; height: 120px;
-            border-radius: 10px; overflow: hidden;
-            border: 2px solid rgba(255,255,255,0.3);
-            z-index: 5; transform: scaleX(-1);
+        /* 狙击镜模式下的视频放大 */
+        video.zoomed {
+            transform: scale(2.5); /* 2.5倍变焦 */
+            transform-origin: center;
         }
-        video { width: 100%; height: 100%; object-fit: cover; }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+            pointer-events: none; /* 确保点击事件穿透给下层，或者由JS统一处理 */
+        }
+
+        /* 狙击镜遮罩 - 纯CSS实现 */
+        .scope-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 4;
+            background: radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.8) 35%, #000 60%);
+            pointer-events: none;
+            display: none;
+        }
         
-        #loader {
-            position: absolute; top: 50%; left: 50%;
+        .scope-crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
             transform: translate(-50%, -50%);
-            color: white; font-size: 20px; z-index: 20;
+            width: 100%;
+            height: 100%;
+            z-index: 6; /* 在 Canvas 之上 */
+            pointer-events: none;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .cross-line {
+            background: rgba(255, 0, 0, 0.8);
+            position: absolute;
+            box-shadow: 0 0 8px rgba(255, 0, 0, 0.5);
+        }
+
+        /* 射击按钮 */
+        #fireBtn {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: rgba(255, 0, 0, 0.2);
+            border: 2px solid #ff0000;
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: bold;
+            font-size: 14px;
+            backdrop-filter: blur(4px);
+            transition: all 0.1s;
+            box-shadow: 0 0 15px rgba(255, 0, 0, 0.3);
+            text-shadow: 0 0 5px #f00;
+            cursor: pointer;
+        }
+        #fireBtn:active {
+            background: rgba(255, 0, 0, 0.8);
+            transform: scale(0.95);
+        }
+
+        /* 狙击模式切换按钮 */
+        #scopeToggle {
+            position: absolute;
+            bottom: 40px;
+            left: 40px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: rgba(0, 255, 0, 0.2);
+            border: 2px solid #0f0;
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #0f0;
+            font-size: 24px;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        #scopeToggle.active {
+            background: rgba(0, 255, 0, 0.6);
+            color: #000;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.6);
+        }
+
+        /* 受击反馈闪烁 */
+        @keyframes hit-flash {
+            0% { background: rgba(255,0,0,0); }
+            10% { background: rgba(255,0,0,0.3); }
+            100% { background: rgba(255,0,0,0); }
+        }
+        .hit-effect {
+            animation: hit-flash 0.2s ease-out;
         }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 </head>
 <body>
 
-    <div id="loader">正在启动摄像头与AI模型...</div>
+    <div id="container">
+        <!-- 注意：video 移除了 display: none，通过 JS 控制显示 -->
+        <video id="webcam" playsinline muted></video>
+        <canvas id="output"></canvas>
+        
+        <!-- 狙击镜视觉层 -->
+        <div id="scopeOverlay" class="scope-overlay"></div>
+        <div id="scopeCrosshair" class="scope-crosshair">
+            <!-- 十字准星 -->
+            <div class="cross-line" style="width: 2px; height: 60px;"></div>
+            <div class="cross-line" style="width: 60px; height: 2px;"></div>
+            <div style="position:absolute; width: 300px; height: 300px; border: 1px solid rgba(255,0,0,0.4); border-radius: 50%;"></div>
+            <div style="position:absolute; width: 4px; height: 4px; background: red; border-radius: 50%;"></div>
+            <div class="text-red-500 text-xs font-mono absolute mt-20 animate-pulse">LOCKED ON</div>
+        </div>
 
-    <div id="ui-panel">
-        <h2>✨ 粒子操控台 2.0</h2>
-        <p>1. 比划数字 1, 2, 3 粒子变形<br>2. 左右挥手旋转视角<br>3. 双手开合控制大小</p>
-        
-        <label>粒子颜色</label>
-        <input type="color" id="color-picker" value="#00ffff" style="width:100%; border:none; height:30px;">
-        
-        <div id="status-indicator">等待手势...</div>
+        <!-- 击杀计数 -->
+        <div class="absolute top-6 right-6 z-30 font-mono text-right pointer-events-none drop-shadow-md">
+            <div class="text-green-500 text-sm">NEUTRALIZED</div>
+            <div id="killCount" class="text-red-500 text-4xl font-bold tracking-tighter">00</div>
+        </div>
+
+        <!-- 武器状态 -->
+        <div class="absolute top-6 left-6 z-30 font-mono pointer-events-none drop-shadow-md">
+            <div class="text-green-500 text-sm">SYSTEM STATUS</div>
+            <div class="text-green-400 text-lg">SCANNING...</div>
+            <div id="ammoDisplay" class="text-yellow-400 text-xs mt-1">MODE: HYBRID RECON</div>
+        </div>
+
+        <!-- 控制按钮 -->
+        <button id="scopeToggle">
+            <!-- Target Icon -->
+            <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
+        </button>
+        <button id="fireBtn">FIRE</button>
     </div>
 
-    <div id="video-container">
-        <video id="input-video"></video>
+    <!-- 加载层 -->
+    <div id="loadingOverlay" class="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-4">
+        <h2 class="text-2xl font-bold text-green-500 mb-2 tracking-widest">TACTICAL OS V3.0</h2>
+        <div class="w-64 bg-gray-900 h-2 rounded overflow-hidden mt-4">
+            <div id="progressBar" class="h-full bg-green-600 w-0 transition-all duration-300"></div>
+        </div>
+        <p id="loadDetail" class="text-green-800 text-xs mt-2 font-mono">Initializing Neural Networks...</p>
+        <button id="startBtn" disabled class="mt-8 px-8 py-3 border border-green-700 text-green-500 opacity-50 font-bold tracking-widest transition-all">WAITING...</button>
     </div>
 
-<script>
-    // --- 1. Three.js 场景搭建 ---
-    const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x050505, 0.002);
+    <script>
+        // DOM Elements
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('output');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('container');
+        const scopeToggle = document.getElementById('scopeToggle');
+        const fireBtn = document.getElementById('fireBtn');
+        const scopeOverlay = document.getElementById('scopeOverlay');
+        const scopeCrosshair = document.getElementById('scopeCrosshair');
+        const killCountEl = document.getElementById('killCount');
+        const ammoDisplay = document.getElementById('ammoDisplay');
 
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 35;
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    document.body.appendChild(renderer.domElement);
-
-    // --- 2. 粒子系统 ---
-    const particleCount = 20000; // 增加粒子数以获得更好的形状细节
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    const targetPositions = new Float32Array(particleCount * 3);
-    
-    for(let i=0; i<particleCount * 3; i++) {
-        positions[i] = (Math.random() - 0.5) * 100;
-        targetPositions[i] = positions[i];
-    }
-    
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    
-    const material = new THREE.PointsMaterial({
-        color: 0x00ffff,
-        size: 0.25,
-        transparent: true,
-        opacity: 0.9,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-    });
-
-    const particles = new THREE.Points(geometry, material);
-    scene.add(particles);
-
-    // --- 3. 形状生成算法 (新增数字 1, 2, 3) ---
-    // 辅助函数：随机点在直线上
-    function pointOnLine(x1, y1, x2, y2) {
-        const t = Math.random();
-        return {
-            x: x1 + (x2 - x1) * t,
-            y: y1 + (y2 - y1) * t,
-            z: (Math.random() - 0.5) * 2 // 少量厚度
-        };
-    }
-    
-    // 辅助函数：随机点在圆弧上
-    function pointOnArc(centerX, centerY, radius, startAngle, endAngle) {
-        const angle = startAngle + Math.random() * (endAngle - startAngle);
-        return {
-            x: centerX + radius * Math.cos(angle),
-            y: centerY + radius * Math.sin(angle),
-            z: (Math.random() - 0.5) * 2
-        };
-    }
-
-    const shapes = {
-        sphere: () => {
-            const r = 12 * Math.cbrt(Math.random());
-            const theta = Math.random() * 2 * Math.PI;
-            const phi = Math.acos(2 * Math.random() - 1);
-            return { x: r*Math.sin(phi)*Math.cos(theta), y: r*Math.sin(phi)*Math.sin(theta), z: r*Math.cos(phi) };
-        },
-        // 数字 1
-        num1: (i) => {
-            const part = Math.random();
-            if (part < 0.8) { 
-                // 竖线 (x=0, y: -10 ~ 10)
-                return pointOnLine(0, -10, 0, 10);
-            } else {
-                // 顶部撇 (x: -3 ~ 0, y: 7 ~ 10)
-                return pointOnLine(-3, 7, 0, 10);
-            }
-        },
-        // 数字 2
-        num2: (i) => {
-            const part = Math.random();
-            if (part < 0.4) {
-                // 顶部半圆 (圆心0, 5, 半径5)
-                return pointOnArc(0, 5, 5, 0, Math.PI);
-            } else if (part < 0.7) {
-                // 斜线 (右上到左下)
-                return pointOnLine(5, 5, -5, -10);
-            } else {
-                // 底部横线
-                return pointOnLine(-5, -10, 5, -10);
-            }
-        },
-        // 数字 3
-        num3: (i) => {
-            const part = Math.random();
-            if (part < 0.5) {
-                // 上半圆
-                return pointOnArc(0, 5, 4, -Math.PI/2, Math.PI*1.2);
-            } else {
-                // 下半圆
-                return pointOnArc(0, -5, 5, -Math.PI*1.2, Math.PI/2);
-            }
-        },
-        heart: (i) => {
-            const t = Math.random() * Math.PI * 2;
-            const x = 16 * Math.pow(Math.sin(t), 3);
-            const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
-            return { x: x * 0.8, y: y * 0.8, z: (Math.random()-0.5)*4 };
-        }
-    };
-
-    let currentShape = 'sphere';
-
-    function transformTo(shapeName) {
-        if (currentShape === shapeName) return; // 避免重复计算
-        currentShape = shapeName;
+        // State
+        let objectModel = null;
+        let poseModel = null;
+        let isDetecting = false;
+        let isSniperMode = false;
+        let killCount = 0;
         
-        const func = shapes[shapeName] || shapes.sphere;
-        for(let i=0; i<particleCount; i++) {
-            const pos = func(i);
-            // 稍微放大一点数字，让它们更清楚
-            const scale = (shapeName.startsWith('num')) ? 1.2 : 1.0;
-            targetPositions[i*3] = pos.x * scale;
-            targetPositions[i*3+1] = pos.y * scale;
-            targetPositions[i*3+2] = pos.z * scale;
-        }
-    }
+        // Tracking System
+        let trackedTargets = []; // 仅追踪人类
+        let nextTargetId = 1;
 
-    // 初始形状
-    transformTo('sphere');
+        // Audio Context
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioContext();
 
-    // --- 4. 手势交互逻辑 (旋转 & 变形) ---
-    const statusDiv = document.getElementById('status-indicator');
-    
-    // 交互变量
-    let handScale = 1.0; 
-    let targetRotationX = 0;
-    let targetRotationY = 0;
-    let gestureDebounceTimer = null; // 防抖
-
-    function countFingers(landmarks) {
-        let count = 0;
-        const tips = [8, 12, 16, 20]; 
-        const pips = [6, 10, 14, 18];
-        // 简单的手指伸直检测 (指尖高于关节)
-        tips.forEach((tip, i) => { if (landmarks[tip].y < landmarks[pips[i]].y) count++; });
-        
-        // 拇指检测 (根据手掌方向判断x轴)
-        // 简单处理：如果拇指尖的x比拇指关节更远离小指，就算伸出
-        // 这是一个非常简化的判断，实战中可能需要更复杂的向量计算
-        // 为了演示数字123，我们主要关注食指(8)、中指(12)、无名指(16)
-        return count; 
-    }
-
-    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-    hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
-
-    hands.onResults((results) => {
-        document.getElementById('loader').style.display = 'none';
-
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const landmarks = results.multiHandLandmarks[0];
+        // --- 音效系统 ---
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
             
-            // --- 需求 2: 手掌位置控制旋转 (反向偏转/跟随) ---
-            // 获取手掌中心 (大概是索引 9 的位置)
-            const palmX = landmarks[9].x; // 0 (左) -> 1 (右)
-            const palmY = landmarks[9].y; // 0 (上) -> 1 (下)
-            
-            // 映射到旋转角度 (-1 到 1 之间 *系数)
-            // 比如：手在右边(x>0.5)，粒子向右转(y轴旋转增加)
-            // 你说"相对应的反正偏转"，这里我做了"跟随"效果，手往右，物体往右转看侧面
-            const rotSpeed = 1.5;
-            targetRotationY = (palmX - 0.5) * rotSpeed * Math.PI; 
-            targetRotationX = (palmY - 0.5) * rotSpeed * Math.PI;
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            const now = audioCtx.currentTime;
 
-            // --- 需求 1 & 基础: 缩放与数字识别 ---
-            let distance = 0;
-            // 双手模式
-            if (results.multiHandLandmarks.length === 2) {
-                const hand1 = results.multiHandLandmarks[0][0];
-                const hand2 = results.multiHandLandmarks[1][0];
-                distance = Math.sqrt(Math.pow(hand1.x-hand2.x, 2) + Math.pow(hand1.y-hand2.y, 2)) * 3;
-            } else {
-                // 单手缩放 (拇指+食指)
-                distance = Math.sqrt(Math.pow(landmarks[4].x-landmarks[8].x, 2) + Math.pow(landmarks[4].y-landmarks[8].y, 2)) * 5;
+            if (type === 'shoot') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(800, now);
+                osc.frequency.exponentialRampToValueAtTime(100, now + 0.15);
+                gainNode.gain.setValueAtTime(1, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            } else if (type === 'hit') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(1200, now);
+                osc.frequency.exponentialRampToValueAtTime(400, now + 0.1);
+                gainNode.gain.setValueAtTime(0.5, now);
+                gainNode.gain.linearRampToValueAtTime(0, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'empty') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(2000, now);
+                gainNode.gain.setValueAtTime(0.1, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+                osc.start(now);
+                osc.stop(now + 0.05);
             }
-            // 平滑缩放
-            handScale += ((0.5 + distance) - handScale) * 0.1;
+        }
 
-            // --- 数字手势触发 ---
-            const fingerCount = countFingers(landmarks);
+        // --- 系统初始化 ---
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        async function initAI() {
+            const loadDetail = document.getElementById('loadDetail');
+            const progressBar = document.getElementById('progressBar');
+            const startBtn = document.getElementById('startBtn');
+
+            await tf.ready();
+            progressBar.style.width = "40%";
             
-            // 简单的防抖逻辑，避免瞬间切换
-            if (!gestureDebounceTimer) {
-                if (fingerCount === 1) {
-                    transformTo('num1');
-                    statusDiv.innerText = "识别: 数字 1";
-                } else if (fingerCount === 2) {
-                    transformTo('num2');
-                    statusDiv.innerText = "识别: 数字 2";
-                } else if (fingerCount === 3) {
-                    transformTo('num3');
-                    statusDiv.innerText = "识别: 数字 3";
-                } else if (fingerCount === 5 || fingerCount === 0) {
-                    transformTo('sphere'); // 张开手或握拳恢复球体
-                    statusDiv.innerText = "模式: 自由操控";
-                }
+            // 加载 COCO-SSD (物体识别)
+            objectModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+            progressBar.style.width = "70%";
+            
+            // 加载 MoveNet (骨骼)
+            const detectorConfig = { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING };
+            poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
+            progressBar.style.width = "100%";
+
+            loadDetail.innerText = "ALL SYSTEMS READY";
+            startBtn.disabled = false;
+            startBtn.innerText = "ENGAGE SYSTEM";
+            startBtn.style.opacity = "1";
+            startBtn.classList.add("bg-green-900/50", "text-white", "hover:bg-green-700");
+            startBtn.onclick = startSystem;
+        }
+
+        async function startSystem() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+                });
+                video.srcObject = stream;
+                // 关键修复：确保视频加载元数据后显示
+                video.onloadedmetadata = () => {
+                    document.getElementById('loadingOverlay').style.display = 'none';
+                    video.style.display = 'block'; // 修复黑屏的关键
+                    video.play();
+                    isDetecting = true;
+                    loop();
+                };
+            } catch (err) {
+                console.error(err);
+                alert("Camera access denied or error: " + err.message);
+            }
+        }
+
+        // --- 交互逻辑 ---
+        scopeToggle.onclick = () => {
+            isSniperMode = !isSniperMode;
+            playSound('empty');
+            
+            if (isSniperMode) {
+                scopeToggle.classList.add('active');
+                video.classList.add('zoomed');
+                scopeOverlay.style.display = 'block';
+                scopeCrosshair.style.display = 'flex';
+                ammoDisplay.innerText = "SNIPER MODE: ACTIVE";
+                ammoDisplay.classList.add("text-red-500");
+                ammoDisplay.classList.remove("text-yellow-400");
+            } else {
+                scopeToggle.classList.remove('active');
+                video.classList.remove('zoomed');
+                scopeOverlay.style.display = 'none';
+                scopeCrosshair.style.display = 'none';
+                ammoDisplay.innerText = "MODE: HYBRID RECON";
+                ammoDisplay.classList.remove("text-red-500");
+                ammoDisplay.classList.add("text-yellow-400");
+            }
+        };
+
+        fireBtn.onclick = () => {
+            if (!isDetecting) return;
+            playSound('shoot');
+            container.classList.add('hit-effect');
+            setTimeout(() => container.classList.remove('hit-effect'), 200);
+            checkHit();
+        };
+
+        function checkHit() {
+            // 判定屏幕中心
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            let hitRegistered = false;
+
+            trackedTargets.forEach(target => {
+                if (target.hp <= 0) return;
+                const { x, y, w, h } = target.renderCoords;
                 
-                // 设置200ms的冷却时间，避免闪烁
-                gestureDebounceTimer = setTimeout(() => { gestureDebounceTimer = null; }, 200);
+                // 宽松判定：只要中心点在框内，或者十字准星(中心区域)与框相交
+                if (centerX >= x && centerX <= x + w && centerY >= y && centerY <= y + h) {
+                    target.hp = 0;
+                    hitRegistered = true;
+                    target.hitTime = Date.now();
+                    killCount++;
+                    killCountEl.innerText = killCount.toString().padStart(2, '0');
+                    playSound('hit');
+                }
+            });
+            
+            if (hitRegistered) {
+                ammoDisplay.innerText = "TARGET ELIMINATED";
+                setTimeout(() => {
+                    ammoDisplay.innerText = isSniperMode ? "SNIPER MODE: ACTIVE" : "MODE: HYBRID RECON";
+                }, 1000);
+            }
+        }
+
+        // --- 核心逻辑 ---
+
+        // 分离预测结果：人 vs 物品
+        function processPredictions(predictions, scale, offsetX, offsetY) {
+            const now = Date.now();
+            
+            // 1. 处理人类 (用于追踪和游戏逻辑)
+            const personDetections = predictions
+                .filter(p => p.class === 'person')
+                .map(p => {
+                    const [bx, by, bw, bh] = p.bbox; 
+                    return { x: bx, y: by, w: bw, h: bh };
+                });
+            
+            // 更新追踪器
+            personDetections.forEach(det => {
+                let bestDist = 10000;
+                let bestTarget = null;
+                for (let t of trackedTargets) {
+                    const dist = Math.hypot(t.x - det.x, t.y - det.y);
+                    if (dist < 150 && dist < bestDist) { // 稍微放宽距离阈值
+                        bestDist = dist;
+                        bestTarget = t;
+                    }
+                }
+                if (bestTarget) {
+                    bestTarget.x = det.x; bestTarget.y = det.y;
+                    bestTarget.w = det.w; bestTarget.h = det.h;
+                    bestTarget.lastSeen = now;
+                } else {
+                    trackedTargets.push({
+                        id: nextTargetId++,
+                        x: det.x, y: det.y, w: det.w, h: det.h,
+                        hp: 100, lastSeen: now, hitTime: 0
+                    });
+                }
+            });
+            trackedTargets = trackedTargets.filter(t => now - t.lastSeen < 1000);
+
+            // 2. 返回非人类物品 (直接用于绘制)
+            const items = predictions
+                .filter(p => p.class !== 'person')
+                .map(p => {
+                    const [bx, by, bw, bh] = p.bbox;
+                    return {
+                        class: p.class,
+                        score: p.score,
+                        x: bx, y: by, w: bw, h: bh
+                    };
+                });
+
+            return items;
+        }
+
+        async function loop() {
+            if (!isDetecting) return;
+
+            // 1. 清空 Canvas (因为视频在 CSS 层显示了，我们只画 UI)
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const videoW = video.videoWidth;
+            const videoH = video.videoHeight;
+            const screenW = canvas.width;
+            const screenH = canvas.height;
+
+            if (videoW === 0) {
+                requestAnimationFrame(loop);
+                return;
             }
 
-        } else {
-            // 没检测到手，慢慢回正
-            targetRotationX *= 0.95;
-            targetRotationY *= 0.95;
-            handScale += (1.0 - handScale) * 0.05;
-            statusDiv.innerText = "未检测到手势";
-        }
-    });
+            // 2. 计算 Canvas 与 CSS Video 的对齐
+            // Video 使用 object-fit: cover
+            const baseScale = Math.max(screenW / videoW, screenH / videoH);
+            const sniperZoom = isSniperMode ? 2.5 : 1.0;
+            const finalScale = baseScale * sniperZoom;
 
-    const cameraUtils = new Camera(document.getElementById('input-video'), {
-        onFrame: async () => await hands.send({image: document.getElementById('input-video')}),
-        width: 320, height: 240
-    });
-    cameraUtils.start();
+            // 居中偏移量
+            const drawW = videoW * finalScale;
+            const drawH = videoH * finalScale;
+            const offsetX = (screenW - drawW) / 2;
+            const offsetY = (screenH - drawH) / 2;
 
-    // --- 5. 动画循环 ---
-    const clock = new THREE.Clock();
-    
-    // UI 颜色控制
-    document.getElementById('color-picker').addEventListener('input', (e) => {
-        material.color.set(e.target.value);
-    });
+            if (video.readyState === 4) {
+                // 3. 运行模型 (提高置信度到 0.25 使得更多物品被识别)
+                const predictions = await objectModel.detect(video, 30, 0.25);
+                
+                // 4. 处理数据
+                const items = processPredictions(predictions, finalScale, offsetX, offsetY);
 
-    function animate() {
-        requestAnimationFrame(animate);
-        const time = clock.getElapsedTime();
-        const positionsArray = geometry.attributes.position.array;
+                // 5. 绘制非人类物品 (青色)
+                drawItems(items, finalScale, offsetX, offsetY);
 
-        // --- 核心逻辑：应用旋转 ---
-        // 使用 Lerp 平滑过渡到目标角度
-        particles.rotation.y += (targetRotationY - particles.rotation.y) * 0.05;
-        particles.rotation.x += (targetRotationX - particles.rotation.x) * 0.05;
-        
-        // 基础自转 (如果没有手势操控时保留一点微动)
-        if (Math.abs(targetRotationY) < 0.1) {
-            particles.rotation.y += 0.002; 
-        }
+                // 6. 绘制人类目标 (绿色/红色)
+                drawTargets(finalScale, offsetX, offsetY);
 
-        // 粒子更新
-        for (let i = 0; i < particleCount; i++) {
-            const idx = i * 3;
-            const tx = targetPositions[idx];
-            const ty = targetPositions[idx+1];
-            const tz = targetPositions[idx+2];
-
-            const cx = positionsArray[idx];
-            const cy = positionsArray[idx+1];
-            const cz = positionsArray[idx+2];
-
-            // 1. 变形 Morphing
-            positionsArray[idx]   += (tx - cx) * 0.08;
-            positionsArray[idx+1] += (ty - cy) * 0.08;
-            positionsArray[idx+2] += (tz - cz) * 0.08;
-
-            // 2. 噪声干扰 (让粒子看起来是活的)
-            const noise = Math.sin(time * 3 + cx * 0.1) * 0.05;
-            positionsArray[idx] += noise;
+                // 7. 绘制骨骼 (仅在非狙击模式下，为了清晰)
+                if (!isSniperMode) {
+                    const poses = await poseModel.estimatePoses(video);
+                    drawSkeletons(poses, finalScale, offsetX, offsetY);
+                }
+            }
             
-            // 3. 应用手势缩放 (向中心缩放)
-            // 注意：这里我们通过修改 geometry 实现缩放，和 rotation 分开
-            // 最简单的方法是直接缩放整个 Object3D，但为了保持粒子特效的质感，
-            // 我们这里通过视觉上的fov或者简单的缩放系数来做
+            requestAnimationFrame(loop);
         }
-        
-        // 简单暴力应用缩放
-        particles.scale.set(handScale, handScale, handScale);
 
-        geometry.attributes.position.needsUpdate = true;
-        renderer.render(scene, camera);
-    }
-    
-    // 窗口自适应
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+        function drawItems(items, scale, offsetX, offsetY) {
+            ctx.lineWidth = 2;
+            ctx.font = '14px "Courier New"';
 
-    animate();
-</script>
+            items.forEach(item => {
+                const x = item.x * scale + offsetX;
+                const y = item.y * scale + offsetY;
+                const w = item.w * scale;
+                const h = item.h * scale;
+
+                // 物品绘制样式：青色，科技感
+                ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
+                ctx.strokeRect(x, y, w, h);
+
+                // 标签背景
+                const label = `${item.class.toUpperCase()} ${Math.round(item.score * 100)}%`;
+                const textWidth = ctx.measureText(label).width;
+                
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.6)';
+                ctx.fillRect(x, y - 20, textWidth + 10, 20);
+                
+                ctx.fillStyle = '#000';
+                ctx.fillText(label, x + 5, y - 5);
+            });
+        }
+
+        function drawTargets(scale, offsetX, offsetY) {
+            trackedTargets.forEach(target => {
+                const rx = target.x * scale + offsetX;
+                const ry = target.y * scale + offsetY;
+                const rw = target.w * scale;
+                const rh = target.h * scale;
+                
+                // 保存渲染坐标用于击杀判定
+                target.renderCoords = { x: rx, y: ry, w: rw, h: rh };
+
+                const isDead = target.hp <= 0;
+                const color = isDead ? '#ff0000' : '#00ff00';
+
+                ctx.strokeStyle = color;
+                ctx.lineWidth = isSniperMode ? 3 : 2;
+
+                if (isDead) {
+                    // 死亡十字
+                    ctx.beginPath();
+                    ctx.moveTo(rx, ry); ctx.lineTo(rx + rw, ry + rh);
+                    ctx.moveTo(rx + rw, ry); ctx.lineTo(rx, ry + rh);
+                    ctx.stroke();
+                    ctx.fillStyle = '#ff0000';
+                    ctx.font = 'bold 16px Arial';
+                    ctx.fillText("ELIMINATED", rx, ry - 5);
+                } else {
+                    // 存活框
+                    // 只有在狙击模式或者靠近中心时才画完整的框，否则画角标（优化视觉）
+                    if (isSniperMode) {
+                        // 狙击模式：括号式瞄准框
+                        const len = rw / 4;
+                        ctx.beginPath();
+                        // 左上
+                        ctx.moveTo(rx, ry + len); ctx.lineTo(rx, ry); ctx.lineTo(rx + len, ry);
+                        // 右上
+                        ctx.moveTo(rx + rw - len, ry); ctx.lineTo(rx + rw, ry); ctx.lineTo(rx + rw, ry + len);
+                        // 右下
+                        ctx.moveTo(rx + rw, ry + rh - len); ctx.lineTo(rx + rw, ry + rh); ctx.lineTo(rx + rw - len, ry + rh);
+                        // 左下
+                        ctx.moveTo(rx + len, ry + rh); ctx.lineTo(rx, ry + rh); ctx.lineTo(rx, ry + rh - len);
+                        ctx.stroke();
+                    } else {
+                         ctx.strokeRect(rx, ry, rw, rh);
+                    }
+
+                    // 血条
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(rx, ry - 10, rw, 6);
+                    ctx.fillStyle = color;
+                    ctx.fillRect(rx, ry - 10, rw * (target.hp / 100), 6);
+
+                    // 距离/信息
+                    ctx.fillStyle = color;
+                    ctx.font = '12px Courier New';
+                    // 模拟距离: 假设人高1.7m, 根据框高估算
+                    const dist = Math.max(5, Math.round(5000 / rh)); 
+                    ctx.fillText(`TARGET ${dist}m`, rx, ry + rh + 15);
+                }
+            });
+        }
+
+        function drawSkeletons(poses, scale, offsetX, offsetY) {
+            if (!poses) return;
+            const connections = [[0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
+            
+            poses.forEach(pose => {
+                // 简单过滤：检查这个骨骼是否属于一个“已死亡”的目标
+                // (此处为简化计算，暂不进行严格匹配，仅根据框的位置粗略判断，或者直接全部绘制)
+                
+                ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
+                ctx.lineWidth = 2;
+                
+                // 绘制连线
+                connections.forEach(([i, j]) => {
+                    const kp1 = pose.keypoints[i];
+                    const kp2 = pose.keypoints[j];
+                    if (kp1.score > 0.3 && kp2.score > 0.3) {
+                        const x1 = kp1.x * scale + offsetX;
+                        const y1 = kp1.y * scale + offsetY;
+                        const x2 = kp2.x * scale + offsetX;
+                        const y2 = kp2.y * scale + offsetY;
+                        ctx.beginPath();
+                        ctx.moveTo(x1, y1);
+                        ctx.lineTo(x2, y2);
+                        ctx.stroke();
+                    }
+                });
+            });
+        }
+
+        initAI();
+
+    </script>
 </body>
 </html>
